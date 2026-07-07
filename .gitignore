@@ -1,0 +1,16 @@
+# build output
+target/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# env / secrets
+.env
+*.env
+*.kubeconfig
+
+# logs
+*.log
