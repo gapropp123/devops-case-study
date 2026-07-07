@@ -1,0 +1,83 @@
+---
+# Usage: ansible-playbook -i inventory.ini teardown-all.yml -e repo_root=/abs/path/to/repo
+#        ansible-playbook -i inventory.ini teardown-all.yml -e repo_root=/abs/path/to/repo -e delete_cluster=true
+- name: tear down the app, Jenkins and the monitoring stack
+  hosts: local
+  gather_facts: false
+  vars:
+    delete_cluster: false
+
+  tasks:
+    - name: fail fast if repo_root wasn't passed in
+      ansible.builtin.assert:
+        that:
+          - repo_root is defined
+        fail_msg: "pass -e repo_root=<absolute path to the repo> (see Makefile)"
+
+    - name: remove the app's Kubernetes objects (deployment/service/configmap)
+      kubernetes.core.k8s:
+        state: absent
+        src: "{{ item }}"
+      loop:
+        - "{{ repo_root }}/k8s/deployment.yaml"
+        - "{{ repo_root }}/k8s/service.yaml"
+        - "{{ repo_root }}/k8s/configmap.yaml"
+      ignore_errors: true
+
+    - name: remove the jenkins-deployer RBAC objects
+      kubernetes.core.k8s:
+        state: absent
+        src: "{{ item }}"
+      loop: "{{ lookup('fileglob', repo_root + '/k8s/rbac/*.yaml', wantlist=True) }}"
+      ignore_errors: true
+
+    - name: remove the GHCR imagePullSecret
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: Secret
+        name: ghcr-pull-secret
+        namespace: default
+      ignore_errors: true
+
+    - name: stop the monitoring stack
+      ansible.builtin.command: docker compose -f monitoring/docker-compose.yml --env-file .env down
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: stop the Jenkins/agent/demo-app stack
+      ansible.builtin.command: docker compose down
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: tear down the {{ target_env | default('(none requested)') }} environment (Task 2 IaC)
+      when: target_env is defined
+      block:
+        - name: only dev/staging/prod are valid environments here
+          ansible.builtin.assert:
+            that:
+              - target_env in ['dev', 'staging', 'prod']
+            fail_msg: "target_env must be one of dev, staging, prod (got '{{ target_env }}')"
+
+        - name: load this environment's namespace name
+          ansible.builtin.include_vars:
+            file: "group_vars/{{ target_env }}.yml"
+
+        - name: delete namespace (cascades to everything in it)
+          kubernetes.core.k8s:
+            state: absent
+            api_version: v1
+            kind: Namespace
+            name: "{{ k8s_namespace }}"
+          ignore_errors: true
+
+    - name: delete the minikube cluster too (only if asked for)
+      ansible.builtin.command: minikube delete
+      when: delete_cluster | bool
+
+    - name: done
+      ansible.builtin.debug:
+        msg: >-
+          torn down: app removed from the cluster, RBAC/secret removed, Jenkins+monitoring
+          stopped.{{ ' minikube cluster deleted too.' if (delete_cluster | bool) else
+          ' minikube cluster left running (pass -e delete_cluster=true to remove it too).' }}

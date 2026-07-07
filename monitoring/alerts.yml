@@ -1,0 +1,48 @@
+groups:
+  - name: demo-app
+    rules:
+      - alert: AppDown
+        expr: up{job="demo-app"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "demo-app is not reachable"
+          description: "Prometheus has not been able to scrape demo-app for 30s."
+
+      - alert: HighErrorRate
+        expr: |
+          rate(http_server_requests_seconds_count{job="demo-app", status=~"5.."}[2m])
+          /
+          rate(http_server_requests_seconds_count{job="demo-app"}[2m])
+          > 0.1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "demo-app 5xx rate above 10%"
+          description: "More than 10% of requests to demo-app are failing with a 5xx status."
+
+      - alert: HighLatency
+        expr: |
+          rate(http_server_requests_seconds_sum{job="demo-app", uri="/simulate-load"}[2m])
+          /
+          rate(http_server_requests_seconds_count{job="demo-app", uri="/simulate-load"}[2m])
+          > 0.05
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "demo-app /simulate-load average latency above 50ms"
+          description: "Average response time for /simulate-load has been above 50ms for 1 minute."
+
+  - name: jenkins
+    rules:
+      - alert: JenkinsDown
+        expr: up{job="jenkins"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Jenkins is not reachable"
+          description: "Prometheus has not been able to scrape the Jenkins controller for 30s."

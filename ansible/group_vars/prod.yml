@@ -1,0 +1,8 @@
+env_name: prod
+k8s_namespace: "demo-prod"
+app_replicas: 2
+cpu_request: 200m
+cpu_limit: "1"
+memory_request: 512Mi
+memory_limit: 1Gi
+simulate_load: "false"

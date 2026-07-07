@@ -1,0 +1,46 @@
+jenkins:
+  systemMessage: "demo-app CI/CD"
+  numExecutors: 0
+  mode: EXCLUSIVE
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "${JENKINS_ADMIN_USER:-admin}"
+          password: "${JENKINS_ADMIN_PASSWORD}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  remotingSecurity:
+    enabled: true
+  nodes:
+    - permanent:
+        name: "agent-1"
+        remoteFS: "/home/jenkins/agent"
+        numExecutors: 2
+        labelString: "docker-agent"
+        mode: NORMAL
+        launcher:
+          inbound:
+            webSocket: true
+            workDirSettings:
+              disabled: false
+              failIfWorkDirIsMissing: false
+              internalDir: "remoting"
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - usernamePassword:
+              scope: GLOBAL
+              id: "ghcr-credentials"
+              description: "GHCR push credentials"
+              username: "${GHCR_USERNAME:-}"
+              password: "${GHCR_PAT:-}"
+          - file:
+              scope: GLOBAL
+              id: "kubeconfig-deployer"
+              description: "jenkins-deployer kubeconfig (namespace-scoped, minikube)"
+              fileName: "kubeconfig"
+              secretBytes: "${KUBECONFIG_DEPLOYER_B64:-}"

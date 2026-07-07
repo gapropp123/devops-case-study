@@ -1,0 +1,8 @@
+env_name: dev
+k8s_namespace: "demo-dev"
+app_replicas: 1
+cpu_request: 100m
+cpu_limit: 500m
+memory_request: 256Mi
+memory_limit: 512Mi
+simulate_load: "false"

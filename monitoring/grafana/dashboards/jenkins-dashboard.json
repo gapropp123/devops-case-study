@@ -1,0 +1,71 @@
+{
+  "title": "jenkins",
+  "uid": "jenkins",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Last build duration (s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "default_jenkins_builds_last_build_duration_milliseconds / 1000",
+          "legendFormat": "{{jenkins_job}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Last build result (0=success)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "default_jenkins_builds_last_build_result_ordinal",
+          "legendFormat": "{{jenkins_job}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Health score",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "default_jenkins_builds_health_score",
+          "legendFormat": "{{jenkins_job}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Tests total / failing (last build)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "default_jenkins_builds_last_build_tests_total",
+          "legendFormat": "total"
+        },
+        {
+          "expr": "default_jenkins_builds_last_build_tests_failing",
+          "legendFormat": "failing"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Jenkins up",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "up{job=\"jenkins\"}", "legendFormat": "up" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+env_name: staging
+k8s_namespace: "demo-staging"
+app_replicas: 2
+cpu_request: 100m
+cpu_limit: 500m
+memory_request: 256Mi
+memory_limit: 512Mi
+simulate_load: "false"

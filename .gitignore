@@ -11,6 +11,7 @@ target/
 .env
 *.env
 *.kubeconfig
+monitoring/secrets/
 
 # logs
 *.log

@@ -1,0 +1,5 @@
+.git/
+app/target/classes/
+app/target/test-classes/
+app/target/site/
+app/target/surefire-reports/

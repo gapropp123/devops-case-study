@@ -1,0 +1,169 @@
+---
+# Usage: ansible-playbook -i inventory.ini bootstrap-all.yml -e repo_root=/abs/path/to/repo
+- name: bring up the full stack (cluster, Jenkins, monitoring) and run one pipeline build
+  hosts: local
+  gather_facts: false
+  vars:
+    minikube_cpus: 2
+    minikube_memory: "4096mb"
+
+  tasks:
+    - name: fail fast if repo_root wasn't passed in
+      ansible.builtin.assert:
+        that:
+          - repo_root is defined
+        fail_msg: "pass -e repo_root=<absolute path to the repo> (see Makefile)"
+
+    - name: make sure .env exists before doing anything else
+      ansible.builtin.stat:
+        path: "{{ repo_root }}/.env"
+      register: env_file
+
+    - name: fail with a clear message if .env is missing
+      ansible.builtin.fail:
+        msg: ".env not found at {{ repo_root }}/.env - copy .env.example to .env and fill in the credentials first."
+      when: not env_file.stat.exists
+
+    - name: check whether a minikube cluster is already running
+      ansible.builtin.command: minikube status
+      register: mk_status
+      changed_when: false
+      failed_when: false
+
+    - name: start minikube (none was running, or it wasn't fully healthy)
+      ansible.builtin.command: >
+        minikube start --driver=docker --force
+        --cpus={{ minikube_cpus }} --memory={{ minikube_memory }}
+      when: mk_status.rc != 0
+      register: mk_start
+
+    - name: report that an existing cluster was reused
+      ansible.builtin.debug:
+        msg: "minikube already running and healthy - reusing it, not touching cluster state"
+      when: mk_status.rc == 0
+
+    - name: enable the metrics-server addon (idempotent either way)
+      ansible.builtin.command: minikube addons enable metrics-server
+      register: mk_addons
+      changed_when: "'was successfully enabled' in mk_addons.stdout"
+
+    - name: bring up Jenkins controller + agent + the standalone demo-app container
+      ansible.builtin.command: ./scripts/jenkins-bootstrap.sh
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: apply the jenkins-deployer RBAC manifests
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ item }}"
+      loop: "{{ lookup('fileglob', repo_root + '/k8s/rbac/*.yaml', wantlist=True) }}"
+
+    - name: build the deployer kubeconfig secret
+      ansible.builtin.command: ./scripts/gen-deployer-kubeconfig.sh
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: build the GHCR imagePullSecret
+      ansible.builtin.command: ./scripts/gen-ghcr-pull-secret.sh
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: restart the Jenkins controller so JCasC picks up the fresh kubeconfig credential
+      ansible.builtin.command: docker compose up -d --build jenkins
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: wait for Jenkins to come back up
+      ansible.builtin.uri:
+        url: "http://localhost:8080/login"
+        status_code: 200
+      register: jenkins_up
+      until: jenkins_up.status == 200
+      retries: 30
+      delay: 3
+
+    - name: write the Prometheus scrape password out of .env
+      ansible.builtin.command: ./scripts/gen-prometheus-secrets.sh
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: bring up Prometheus + Grafana
+      ansible.builtin.command: docker compose -f monitoring/docker-compose.yml --env-file .env up -d
+      args:
+        chdir: "{{ repo_root }}"
+
+    - name: create (or update) the demo-app-pipeline job
+      ansible.builtin.command: ./scripts/jenkins-create-pipeline-job.sh
+      args:
+        chdir: "{{ repo_root }}"
+      environment:
+        REPO_URL: /workspace-src
+
+    - name: trigger a real pipeline build and wait for it to finish
+      ansible.builtin.command: ./scripts/jenkins-trigger-build.sh
+      args:
+        chdir: "{{ repo_root }}"
+      register: pipeline_run
+
+    - name: show the pipeline result
+      ansible.builtin.debug:
+        var: pipeline_run.stdout_lines
+
+    - name: get the minikube node IP for the final reachability check
+      ansible.builtin.command: minikube ip
+      register: mk_ip
+      changed_when: false
+
+    - name: confirm the app is reachable after the pipeline deploy
+      ansible.builtin.uri:
+        url: "http://{{ mk_ip.stdout }}:30080/actuator/health"
+        status_code: 200
+
+    - name: done
+      ansible.builtin.debug:
+        msg: >-
+          stack is up: Jenkins http://localhost:8080, Grafana http://localhost:3000,
+          Prometheus http://localhost:9090, app http://{{ mk_ip.stdout }}:30080
+
+    - name: provision the {{ target_env | default('(none requested)') }} environment (Task 2 IaC)
+      when: target_env is defined
+      block:
+        - name: only dev/staging/prod are valid environments here
+          ansible.builtin.assert:
+            that:
+              - target_env in ['dev', 'staging', 'prod']
+            fail_msg: "target_env must be one of dev, staging, prod (got '{{ target_env }}')"
+
+        - name: load this environment's sizing/config (namespace, replicas, resource limits)
+          ansible.builtin.include_vars:
+            file: "group_vars/{{ target_env }}.yml"
+
+        - name: make sure the demo-app jar exists (this path bypasses the Jenkins
+            pipeline, which is the only other thing that produces it)
+          ansible.builtin.stat:
+            path: "{{ repo_root }}/app/target/demo-app.jar"
+          register: app_jar
+
+        - name: fail with a clear message if the jar is missing
+          ansible.builtin.fail:
+            msg: >-
+              {{ repo_root }}/app/target/demo-app.jar not found - build it first, e.g.
+              docker run --rm -v {{ repo_root }}/app:/app -w /app
+              maven:3.9-eclipse-temurin-21 mvn -B -q package -DskipTests
+          when: not app_jar.stat.exists
+
+        - name: build the demo-app:v1 image from that jar
+          ansible.builtin.command: docker build -f docker/Dockerfile -t demo-app:v1 .
+          args:
+            chdir: "{{ repo_root }}"
+
+        - name: load the image into the minikube node (containerd doesn't share the host's docker image store)
+          ansible.builtin.command: minikube image load demo-app:v1
+
+        - name: apply this environment's namespace/configmap/deployment/service
+          ansible.builtin.include_role:
+            name: k8s-app
+
+        - name: done (environment)
+          ansible.builtin.debug:
+            msg: "{{ target_env }} provisioned: namespace {{ k8s_namespace }}, {{ app_replicas }} replica(s)"
