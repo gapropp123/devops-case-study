@@ -14,8 +14,6 @@ default).
 - `monitoring/` - Prometheus + Grafana, run separately from the cluster (see below for why)
 - `ci/jcasc/` - Jenkins Configuration as Code
 - `scripts/` - bootstrap/helper scripts used by the README steps and by `ansible/bootstrap-all.yml`
-- `report/` - the write-up: `Part1_TheoreticalExercise_Report_DanhVo.md` and
-  `Part2_PracticalExercise_Report_DanhVo.md`
 - `Jenkinsfile` - the pipeline itself
 - `Makefile` - thin wrapper around the Ansible playbooks
 
